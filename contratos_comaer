@@ -1,0 +1,119 @@
+import requests
+import pandas as pd
+
+def obter_dados_api(codigo_orgao, data_inicial):
+    url = "https://api.portaldatransparencia.gov.br/api-de-dados/contratos"
+    chave_api = ""
+
+    params = {"codigoOrgao": codigo_orgao, "quantidade": 100, "dataInicial": data_inicial, "pagina": 1}
+    headers = {"accept": "*/*", "chave-api-dados": chave_api}
+
+    dados_paginas = []
+
+    while True:
+        try:
+            response = requests.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            dados_json = response.json()
+
+            if not dados_json:
+                break
+
+            dados_paginas.extend(dados_json)
+            params["pagina"] += 1
+
+        except requests.exceptions.RequestException as e:
+            print("Erro ao fazer a requisição:", e)
+            break
+
+    return dados_paginas
+
+def criar_dataframe():
+    codigo_orgao = "52111"
+    data_inicial = "01/01/2018"
+
+    dados_contratos = obter_dados_api(codigo_orgao, data_inicial)
+
+    if dados_contratos:
+        df = pd.DataFrame(dados_contratos)
+        return df
+    else:
+        return None
+
+if __name__ == "__main__":
+    df = criar_dataframe()
+
+ # renomeiei para nao ficar com colunas repetidas. Existem colunas que são dicionarios e que possuem nomes iguais aos da coluna. Como normalizei essas colunas, os dicionarios acabam virando nomes de noas colunas   
+df.rename(columns={'id': 'id_inicial','objeto':'objeto_contrato'}, inplace=True)
+df.shape
+# Normalizando as colunas que contem dicionario de dados
+compras_df = pd.json_normalize(df['compra'])
+unidade_gestora_df = pd.json_normalize(df['unidadeGestora'])
+fornecedor_df = pd.json_normalize(df['fornecedor'])
+
+# Concatenar o DataFrame original (df) com os DataFrames das colunas de compras e unidadeGestora
+df_normalizado = pd.concat([df, compras_df, fornecedor_df,unidade_gestora_df], axis=1)
+df_normalizado.drop(['compra', 'unidadeGestora','orgaoVinculado.codigoSIAFI', 'orgaoVinculado.cnpj',
+       'orgaoVinculado.sigla', 'orgaoVinculado.nome', 'orgaoMaximo.codigo',
+       'orgaoMaximo.sigla', 'orgaoMaximo.nome','numeroProcesso','unidadeGestoraCompras','descricaoPoder','fornecedor','id','objeto','cpfFormatado','numeroInscricaoSocial','razaoSocialReceita','nomeFantasiaReceita','tipo'], axis=1, inplace=True)
+
+# Transpor o DataFrame para tornar as colunas em linhas
+
+# Transpor o DataFrame para identificar colunas duplicadas
+df_t = df_normalizado.T
+
+# Identificar e manter apenas as colunas não duplicadas
+df_normalizado = df_t.loc[:, ~df_t.columns.duplicated()]
+df_final =df_normalizado.T
+df_final
+#renomieo para nao dar duplicidade novamente com os dicionarios de coluna
+df_final.rename(columns={'codigo': 'uge','nome':'nome_uge'}, inplace=True)
+df_final
+# Excluir linhas duplicadas com valores iguais em duas colunas específicas
+colunas_para_verificar_duplicatas = ['valorInicialCompra', 'valorFinalCompra']
+
+df_final_corrigido = df_final.drop_duplicates(subset=colunas_para_verificar_duplicatas, keep='first')
+
+df_final_corrigido
+#filtrando apenas uma UGe
+df_120006= df_final_corrigido[df_final_corrigido['uge'] == '120006']
+df_120006
+
+# Primeiro, crio um novo dataframe contendo a contagem de contratos por modalidade de compra.
+df_contagem_modalidade = df_final_corrigido.groupby('modalidadeCompra')['id_inicial'].count().reset_index()
+
+# Renomeioas colunas do novo dataframe para facilitar a compreensão
+df_contagem_modalidade.columns = ['Modalidade de Compra', 'Quantidade de Contratos']
+
+# Ordenando o dataframe pela coluna 'Quantidade de Contratos' em ordem decrescente
+df_contagem_modalidade = df_contagem_modalidade.sort_values(by='Quantidade de Contratos',ascending=False)
+
+df_contagem_modalidade
+
+#agora mesmo código, porém utilizando o df da uge 120006
+# Primeiro, crio um novo dataframe contendo a contagem de contratos por modalidade de compra da UGE 120006.
+df_contagem_modalidade = df_120006.groupby('modalidadeCompra')['id_inicial'].count().reset_index()
+
+# Renomeando as colunas do novo dataframe para facilitar a compreensão
+df_contagem_modalidade.columns = ['Modalidade de Compra', 'Quantidade de Contratos']
+
+# Ordenando o dataframe pela coluna 'Quantidade de Contratos' em ordem decrescente
+df_contagem_modalidade = df_contagem_modalidade.sort_values(by='Quantidade de Contratos',ascending=False)
+
+df_contagem_modalidade.set_index('Modalidade de Compra')
+# Para criar um gráfico de exemplo, utilizei o matplotlib
+pip install matplotlib
+
+import matplotlib.pyplot as plt
+
+# Supondo que o dataframe "df_contagem_modalidade" já foi criado e ordenado conforme mencionado.
+
+# Plotando o gráfico de barras
+plt.figure(figsize=(10, 6))
+plt.bar(df_contagem_modalidade['Modalidade de Compra'], df_contagem_modalidade['Quantidade de Contratos'])
+plt.xticks(rotation=45, ha='right')
+plt.xlabel('Modalidade de Compra')
+plt.ylabel('Quantidade de Contratos')
+plt.title('Quantidade de Contratos por Modalidade de Compra na UG EXEC 120006')
+plt.tight_layout()
+plt.show()
